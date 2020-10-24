@@ -1,0 +1,302 @@
+---
+title: "Milestone Report"
+author: "LJW"
+date: "21/20/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+This document highlights the initial exploration steps in dealing with the Swiftkey
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load Libraries
+library(stringi)
+library(tm)
+library(NLP)
+
+library(rJava)
+library(RWeka)
+library(ggplot2)
+
+library("wordcloud")
+
+
+```
+
+
+## Load data
+```{r}
+dataBaseFilePath   <- getwd()
+```
+
+
+```{r}
+enUSBaseFilePath    <- paste0( dataBaseFilePath, "/en_US/" )
+enUSBlogsFilename   <- "en_US.blogs.txt"
+enUSBlogsFilepath   <- paste0( enUSBaseFilePath, enUSBlogsFilename ) 
+enUSNewsFilename    <- "en_US.news.txt"
+enUSNewsFilepath    <- paste0( enUSBaseFilePath, enUSNewsFilename )
+enUSTwitterFilename <- "en_US.twitter.txt"
+enUSTwitterFilepath <- paste0( enUSBaseFilePath, enUSTwitterFilename )
+
+#Read data from files
+dBlogs    <- readLines( enUSBlogsFilepath, warn=FALSE, encoding = "UTF-8", skipNul = TRUE )
+dNews     <- readLines( enUSNewsFilepath, warn=FALSE, encoding = "UTF-8", skipNul = TRUE )
+dTwitter  <- readLines( enUSTwitterFilepath, warn=FALSE, encoding = "UTF-8", skipNul = TRUE )
+
+```
+
+
+## Summarize data
+```{r}
+# Compute file size in MB
+size_blogs<-file.size(enUSBlogsFilepath)/2^20
+size_news<-file.size(enUSNewsFilepath)/2^20
+size_twitter<-file.size(enUSTwitterFilepath)/2^20
+
+# Counts number of rows
+len_blogs<-length(dBlogs)
+len_news<-length(dNews)
+len_twitter<-length(dTwitter)
+
+# Counts number of characters
+nchar_blogs<-sum(nchar(dBlogs))
+nchar_news<-sum(nchar(dNews))
+nchar_twitter<-sum(nchar(dTwitter))
+
+# Counts number of words
+nword_blogs<-stri_stats_latex(dBlogs)[4]
+nword_news<-stri_stats_latex(dNews)[4]
+nword_twitter<-stri_stats_latex(dTwitter)[4]
+
+table<-data.frame("File Name" = c("Blogs","News","Twitter"),
+                  "File Size(MB)" = c(size_blogs,size_news,size_twitter),
+                  "Num of rows" = c(len_blogs,len_news,len_twitter),
+                  "Num of characters" = c(nchar_blogs,nchar_news,nchar_twitter),
+                  "Num of words" = c(nword_blogs,nword_news,nword_twitter))
+table
+```
+
+
+
+## Clean data
+
+Extract 1% of the whole data as sample data
+
+```{r}
+set.seed(999)
+dBlogs1<-iconv(dBlogs,"latin1","ASCII",sub="")
+dNews1<-iconv(dNews,"latin1","ASCII",sub="")
+dTwitter1<-iconv(dTwitter,"latin1","ASCII",sub="")
+
+rm(dBlogs)
+rm(dNews)
+rm(dTwitter)
+
+# sample data set only 1% of each file
+#sample_data<-c(sample(dBlogs1,length(dBlogs1)*0.01),
+#               sample(dNews1,length(dNews1)*0.01),
+#               sample(dTwitter1,length(dTwitter1)*0.01))
+
+# sample data set only 10% of each file
+sample_data<-c(sample(dBlogs1,length(dBlogs1)*0.1),
+               sample(dNews1,length(dNews1)*0.1),
+               sample(dTwitter1,length(dTwitter1)*0.1))
+
+rm(dBlogs1)
+rm(dNews1)
+rm(dTwitter1)
+```
+
+
+## Build Corpus
+```{r}
+
+
+corpus<-VCorpus(VectorSource(sample_data))
+# Remove punctuation
+corpus1<-tm_map(corpus,removePunctuation)
+# Remove space
+corpus2<-tm_map(corpus1,stripWhitespace)
+# Covert all words to lower case
+corpus3<-tm_map(corpus2,tolower)
+# Remove numbres
+corpus4<-tm_map(corpus3,removeNumbers)
+# Create Plan Text Doc
+corpus5<-tm_map(corpus4,PlainTextDocument)
+# Remove Stopwords
+corpus6<-tm_map(corpus5,removeWords,stopwords("english"))
+corpus_result<-data.frame(text=unlist(sapply(corpus6,'[',"content")),stringsAsFactors = FALSE)
+
+head(corpus_result)
+
+rm(corpus)
+rm(corpus1)
+rm(corpus2)
+rm(corpus3)
+rm(corpus4)
+rm(corpus5)
+```
+
+Build corpus, and check it making data frame.
+
+## Build N-gram 
+
+Extract the word and frequency of N-grams.
+```{r build N-gram}
+
+one <- function(x) NGramTokenizer(x,Weka_control(min=1,max=1))
+two <- function(x) NGramTokenizer(x,Weka_control(min=2,max=2))
+thr <- function(x) NGramTokenizer(x,Weka_control(min=3,max=3))
+fou <- function(x) NGramTokenizer(x,Weka_control(min=4,max=4))
+
+
+one_table <- TermDocumentMatrix(corpus6,control=list(tokenize=one))
+two_table <- TermDocumentMatrix(corpus6,control=list(tokenize=two))
+thr_table <- TermDocumentMatrix(corpus6,control=list(tokenize=thr))
+fou_table <- TermDocumentMatrix(corpus6,control=list(tokenize=fou))
+
+
+one_corpus <- findFreqTerms(one_table,lowfreq=1000)
+two_corpus <- findFreqTerms(two_table,lowfreq=80)
+thr_corpus <- findFreqTerms(thr_table,lowfreq=10)
+fou_corpus <- findFreqTerms(fou_table,lowfreq=10)
+
+
+one_corpus_num <- rowSums(as.matrix(one_table[one_corpus,]))
+one_corpus_table <- data.frame(word=names(one_corpus_num),frequency=one_corpus_num)
+one_corpus_sort <- one_corpus_table[order(-one_corpus_table$frequency),]
+
+two_corpus_num <- rowSums(as.matrix(two_table[two_corpus,]))
+two_corpus_table <- data.frame(word=names(two_corpus_num),frequency=two_corpus_num)
+two_corpus_sort <- two_corpus_table[order(-two_corpus_table$frequency),]
+
+thr_corpus_num <- rowSums(as.matrix(thr_table[thr_corpus,]))
+thr_corpus_table <- data.frame(word=names(thr_corpus_num),frequency=thr_corpus_num)
+thr_corpus_sort <- thr_corpus_table[order(-thr_corpus_table$frequency),]
+
+fou_corpus_num <- rowSums(as.matrix(fou_table[fou_corpus,]))
+fou_corpus_table <- data.frame(word=names(fou_corpus_num),frequency=fou_corpus_num)
+fou_corpus_sort <- fou_corpus_table[order(-fou_corpus_table$frequency),]
+
+#head(one_corpus_sort)
+#head(two_corpus_sort)
+#head(thr_corpus_sort)
+#head(fou_corpus_sort)
+
+one_corpus_sort$word <- as.character(one_corpus_sort$word)
+write.csv(one_corpus_sort[one_corpus_sort$freq > 1,],"one_corpus_sort.csv",row.names=F)
+one_corpus <- read.csv("one_corpus_sort.csv",stringsAsFactors = F)
+saveRDS(one_corpus, file = "one_corpus.RData")
+
+
+two_corpus_sort$word <- as.character(two_corpus_sort$word)
+str2 <- strsplit(two_corpus_sort$word,split=" ")
+two_corpus <- transform(two_corpus_sort, 
+                    one = sapply(str2,"[[",1),   
+                    two = sapply(str2,"[[",2))
+two_corpus <- data.frame(word1 = two_corpus$one, 
+                              word2 = two_corpus$two,
+                              freq = two_corpus$freq,
+                              stringsAsFactors=FALSE)
+## saving files 
+write.csv(two_corpus[two_corpus$freq > 1,],"two_corpus.csv",row.names=F)
+two_corpus <- read.csv("two_corpus.csv",stringsAsFactors = F)
+saveRDS(two_corpus,"two_corpus.RData")
+
+
+thr_corpus_sort$word <- as.character(thr_corpus_sort$word)
+str3 <- strsplit(thr_corpus_sort$word,split=" ")
+thr_corpus <- transform(thr_corpus_sort,
+                     one = sapply(str3,"[[",1),
+                     two = sapply(str3,"[[",2),
+                     three = sapply(str3,"[[",3))
+thr_corpus <- data.frame(word1 = thr_corpus$one,
+                              word2 = thr_corpus$two, 
+                              word3 = thr_corpus$three, 
+                              freq = thr_corpus$freq,
+                              stringsAsFactors=FALSE)
+# saving files
+write.csv(thr_corpus[thr_corpus$freq > 1,],"thr_corpus.csv",row.names=F)
+thr_corpus <- read.csv("thr_corpus.csv",stringsAsFactors = F)
+saveRDS(thr_corpus,"thr_corpus.RData")
+
+
+fou_corpus_sort$word <- as.character(fou_corpus_sort$word)
+str4 <- strsplit(fou_corpus_sort$word,split=" ")
+fou_corpus <- transform(fou_corpus_sort,
+                      one = sapply(str4,"[[",1),
+                      two = sapply(str4,"[[",2),
+                      three = sapply(str4,"[[",3), 
+                      four = sapply(str4,"[[",4))
+# quadgram$words <- NULL
+fou_corpus <- data.frame(word1 = fou_corpus$one,
+                       word2 = fou_corpus$two, 
+                       word3 = fou_corpus$three, 
+                       word4 = fou_corpus$four, 
+                       freq = fou_corpus$freq, 
+                       stringsAsFactors=FALSE)
+# saving files
+write.csv(fou_corpus[fou_corpus$freq > 1,],"fou_corpus.csv",row.names=F)
+fou_corpus <- read.csv("fou_corpus.csv",stringsAsFactors = F)
+saveRDS(fou_corpus,"fou_corpus.RData")
+
+
+```
+
+
+## Plot graph
+
+Plot the graphs of each N-gram words to view the top 10 words of the unigrams, bigrams and trigrams.
+
+
+```{r plot}
+one_g<-ggplot(one_corpus_sort[1:10,],aes(x=reorder(word,-frequency),y=frequency,fill=frequency))
+one_g<-one_g+geom_bar(stat="identity")
+one_g<-one_g+labs(title="unigrams",x="words",y="Frequency")
+one_g<-one_g+theme(axis.text.x=element_text(angle=90))
+one_g
+
+two_g<-ggplot(two_corpus_sort[1:10,],aes(x=reorder(word,-frequency),y=frequency,fill=frequency))
+two_g<-two_g+geom_bar(stat="identity")
+two_g<-two_g+labs(title="bigrams",x="words",y="Frequency")
+two_g<-two_g+theme(axis.text.x=element_text(angle=90))
+two_g
+
+thr_g<-ggplot(thr_corpus_sort[1:10,],aes(x=reorder(word,-frequency),y=frequency,fill=frequency))
+thr_g<-thr_g+geom_bar(stat="identity")
+thr_g<-thr_g+labs(title="trigrams",x="words",y="Frequency")
+thr_g<-thr_g+theme(axis.text.x=element_text(angle=90))
+thr_g
+
+fou_g<-ggplot(fou_corpus_sort[1:10,],aes(x=reorder(word,-frequency),y=frequency,fill=frequency))
+fou_g<-fou_g+geom_bar(stat="identity")
+fou_g<-fou_g+labs(title="quadgrams",x="words",y="Frequency")
+fou_g<-fou_g+theme(axis.text.x=element_text(angle=90))
+fou_g
+
+
+```
+
+```{r}
+set.seed(1234)
+wordcloud(words = one_corpus_sort$word, freq = one_corpus_sort$frequency, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+
+wordcloud(words = two_corpus_sort$word, freq = two_corpus_sort$frequency, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+
+wordcloud(words = thr_corpus_sort$word, freq = thr_corpus_sort$frequency, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
